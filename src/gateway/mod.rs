@@ -134,7 +134,17 @@ pub async fn handle_chat_completions(
         Err(e) => return json_error_response("invalid_request_error", &e),
     };
 
-    let platform = Platform::OpenAI;
+    // Detect platform from model name
+    let model = api_req.model_name();
+    let platform = if model.starts_with("agnes-") {
+        Platform::Agnes
+    } else if model.starts_with("deepseek-") {
+        Platform::DeepSeek
+    } else if model.contains("claude") {
+        Platform::Anthropic
+    } else {
+        Platform::OpenAI
+    };
 
     let converted = match convert_request(&api_req, platform) {
         Ok(req) => req,

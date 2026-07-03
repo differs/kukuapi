@@ -28,6 +28,19 @@ pub enum ApiRequest {
     Agnes(crate::types::agnes::AgnesChatRequest),
 }
 
+impl ApiRequest {
+    /// Extract the model name from any variant.
+    pub fn model_name(&self) -> &str {
+        match self {
+            ApiRequest::Anthropic(r) => &r.model,
+            ApiRequest::OpenAIChat(r) => &r.model,
+            ApiRequest::OpenAIResponses(r) => &r.model,
+            ApiRequest::DeepSeek(r) => &r.model,
+            ApiRequest::Agnes(r) => &r.model,
+        }
+    }
+}
+
 /// Unified response enum covering all supported output formats.
 #[derive(Debug, Clone)]
 pub enum ApiResponse {

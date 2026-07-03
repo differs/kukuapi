@@ -294,6 +294,22 @@ fn register_demo_accounts(service: &mut proxy::GatewayService) {
         rpm_count: AtomicU32::new(0),
         rpm_reset_at: 0,
     });
+
+    // Real Agnes upstream account
+    service.register_account(UpstreamAccount {
+        id: "agnes-1".to_string(),
+        name: "agnes-2.0-flash".to_string(),
+        platform: Platform::Agnes,
+        base_url: "https://api.agnes-ai.com/api/v1".to_string(),
+        auth_token: "API_KEY_REMOVED".to_string(),
+        proxy_url: None,
+        tls_fingerprint_enabled: false,
+        enabled: true,
+        concurrency: 5,
+        current_concurrency: AtomicU32::new(0),
+        rpm_count: AtomicU32::new(0),
+        rpm_reset_at: 0,
+    });
 }
 
 /// Fallback configuration for when config loading fails.
