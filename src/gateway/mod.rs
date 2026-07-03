@@ -193,11 +193,11 @@ fn normalize_model_for_agnes(req: &ApiRequest, agnes_model: &str) -> ApiRequest 
 }
 
 /// Convert a Responses API response into SSE stream events for Codex CLI.
+/// Follows the OpenAI Responses API streaming spec.
 fn responses_to_sse_stream(resp: ResponsesResponse) -> Response {
     let resp_value = serde_json::to_value(&resp).unwrap_or_default();
-    let resp_id = resp.id.clone();
 
-    // Build SSE events
+    // Build SSE events in the correct order per OpenAI spec
     let mut events = Vec::new();
 
     // 1. response.created
@@ -213,19 +213,16 @@ fn responses_to_sse_stream(resp: ResponsesResponse) -> Response {
         // content parts
         if let Some(ref content) = output.content {
             for (idx, part) in content.iter().enumerate() {
-                // output_text.delta (if text)
+                // output_text.delta (send entire text as one delta)
                 if let Some(ref text) = part.text {
-                    for (chunk_i, chunk) in text.as_bytes().chunks(100).enumerate() {
-                        let delta = String::from_utf8_lossy(chunk);
-                        events.push(format!(
-                            "event: response.output_text.delta\ndata: {}\n\n",
-                            serde_json::to_string(&serde_json::json!({
-                                "delta": delta,
-                                "output_index": 0,
-                                "content_index": idx,
-                            })).unwrap_or_default()
-                        ));
-                    }
+                    events.push(format!(
+                        "event: response.output_text.delta\ndata: {}\n\n",
+                        serde_json::to_string(&serde_json::json!({
+                            "delta": text,
+                            "output_index": 0,
+                            "content_index": idx,
+                        })).unwrap_or_default()
+                    ));
                 }
                 // output_text.done
                 events.push(format!("event: response.output_text.done\ndata: {}\n\n",
@@ -240,12 +237,14 @@ fn responses_to_sse_stream(resp: ResponsesResponse) -> Response {
             serde_json::to_string(output).unwrap_or_default()));
     }
 
-    // 3. response.done
-    events.push(format!("event: response.done\ndata: {}\n\n",
-        serde_json::to_string(&serde_json::json!({"response": resp_value})).unwrap_or_default()));
-
-    // 4. response.completed
-    events.push(format!("event: response.completed\ndata: {}\n\n",
+    // 3. Final event based on status (response.completed or response.incomplete)
+    let final_event = if resp.status == "completed" {
+        "response.completed"
+    } else {
+        "response.incomplete"
+    };
+    events.push(format!("event: {}\ndata: {}\n\n",
+        final_event,
         serde_json::to_string(&serde_json::json!({"response": resp_value})).unwrap_or_default()));
 
     let body = events.join("");
