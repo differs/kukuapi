@@ -296,12 +296,14 @@ fn register_demo_accounts(service: &mut proxy::GatewayService) {
     });
 
     // Real Agnes upstream account
+    let agnes_api_key = std::env::var("AGNES_API_KEY")
+        .unwrap_or_else(|_| "sk-placeholder-change-me".to_string());
     service.register_account(UpstreamAccount {
         id: "agnes-1".to_string(),
         name: "agnes-2.0-flash".to_string(),
         platform: Platform::Agnes,
         base_url: "https://api.agnes-ai.com/api/v1".to_string(),
-        auth_token: "API_KEY_REMOVED".to_string(),
+        auth_token: agnes_api_key,
         proxy_url: None,
         tls_fingerprint_enabled: false,
         enabled: true,
