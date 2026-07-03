@@ -1,0 +1,45 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: sub2api
+      POSTGRES_PASSWORD: sub2api-bench-pass
+      POSTGRES_DB: sub2api
+    ports:
+      - "15432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sub2api"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "16379:6379"
+    restart: unless-stopped
+
+  kukuapi:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "18081:18081"
+    environment:
+      KUKUAPI_CONFIG: /app/config.yaml
+      RUST_LOG: info
+      AGNES_API_KEY: ${AGNES_API_KEY:-sk-placeholder}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  pgdata:

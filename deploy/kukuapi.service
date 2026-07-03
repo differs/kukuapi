@@ -1,0 +1,17 @@
+[Unit]
+Description=kukuapi-rs LLM API Gateway
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=de
+WorkingDirectory=/home/de/works/kukuapi
+ExecStart=/home/de/works/kukuapi/target/debug/kukuapi-rs
+Restart=always
+RestartSec=5
+Environment=RUST_LOG=info
+Environment=AGNES_API_KEY=cpk-2MuVvbkR9IzvgYcUXXzezm8nHyUmxLoANeem5UfaUiCjHD7C
+
+[Install]
+WantedBy=multi-user.target
