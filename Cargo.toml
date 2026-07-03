@@ -1,0 +1,114 @@
+[package]
+name = "kukuapi-rs"
+version = "0.1.0"
+edition = "2024"
+description = "LLM API gateway proxy - Rust rewrite of sub2api with multi-platform support"
+
+[dependencies]
+# HTTP server & routing
+axum = { version = "0.8", features = ["ws", "macros", "form"] }
+tokio = { version = "1", features = ["full"] }
+hyper = { version = "1", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+tower = { version = "0.5", features = ["full"] }
+tower-http = { version = "0.6", features = ["fs", "trace", "cors", "compression-full"] }
+
+# Async & networking
+reqwest = { version = "0.12", features = ["gzip", "brotli", "deflate", "stream", "socks", "rustls-tls", "json"] }
+async-stream = "0.3"
+futures = "0.3"
+futures-core = "0.3"
+pin-project = "1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Configuration
+config = "0.14"
+toml = "0.8"
+dotenvy = "0.15"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# UUID & crypto
+uuid = { version = "1", features = ["v4", "serde"] }
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Rate limiting
+dashmap = "6"
+
+# Cache
+moka = { version = "0.12", features = ["future"] }
+
+# Regex
+regex = "1"
+
+# Compression
+flate2 = "1"
+brotli = "7"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Password hashing & JWT
+argon2 = "0.5"
+jsonwebtoken = "9"
+
+# HMAC / signing
+hmac = "0.12"
+sha1 = "0.10"
+
+# URL parsing
+url = "2"
+ipnet = "2"
+
+# ============ NEW DEPENDENCIES ============
+
+# Database: sqlx with PostgreSQL
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "migrate"] }
+
+# OAuth2 client - handled manually via reqwest
+# oauth2 = { version = "5", features = ["curl-rustls"] }
+
+# TLS fingerprint spoofing
+# We interface with the system's TLS via rustls for custom fingerprinting
+rustls = "0.23"
+rustls-pki-types = "1"
+webpki-roots = "1"
+
+# Decimal types for billing
+rust_decimal = { version = "1", features = ["serde"] }
+
+# TOTP for 2FA
+totp-rs = { version = "5" }
+
+# Mock for testing
+mockall = "0.13"
+
+# Redis
+redis = { version = "0.28", features = ["tokio-comp", "connection-manager"] }
+
+# Serde with JSON schema for validation
+schemars = "0.8"
+
+# Async mutex support
+tokio-util = { version = "0.7", features = ["full"] }
+tokio-stream = "0.1"
+
+# Random number generation for OAuth PKCE
+rand = "0.8"
+
+[features]
+default = ["full"]
+full = ["db", "tls-fingerprint"]
+db = []
+tls-fingerprint = []
+json_log = []
