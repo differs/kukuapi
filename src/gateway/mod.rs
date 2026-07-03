@@ -10,7 +10,7 @@ use crate::config::GatewayConfig;
 use crate::middleware::api_key_auth::AuthenticatedKey;
 use crate::proxy::{ForwardError, GatewayService, UpstreamAccount};
 use crate::types::anthropic::{AnthropicRequest, AnthropicResponse};
-use crate::types::openai::{ChatCompletionsRequest, ChatCompletionsResponse, ChatCompletionsChunk, ResponsesRequest};
+use crate::types::openai::{ChatCompletionsRequest, ChatCompletionsResponse, ChatCompletionsChunk, ResponsesRequest, ResponsesResponse};
 use crate::types::deepseek::{DeepSeekChatRequest, DeepSeekChatResponse};
 use crate::types::agnes::{AgnesChatRequest, AgnesChatResponse};
 use crate::middleware::api_key_auth::KeyStore;
@@ -192,12 +192,81 @@ fn normalize_model_for_agnes(req: &ApiRequest, agnes_model: &str) -> ApiRequest 
     }
 }
 
+/// Convert a Responses API response into SSE stream events for Codex CLI.
+fn responses_to_sse_stream(resp: ResponsesResponse) -> Response {
+    let resp_value = serde_json::to_value(&resp).unwrap_or_default();
+    let resp_id = resp.id.clone();
+
+    // Build SSE events
+    let mut events = Vec::new();
+
+    // 1. response.created
+    events.push(format!("event: response.created\ndata: {}\n\n",
+        serde_json::to_string(&serde_json::json!({"response": resp_value})).unwrap_or_default()));
+
+    // 2. output items
+    if let Some(output) = resp.output.first() {
+        // output_item.added
+        events.push(format!("event: response.output_item.added\ndata: {}\n\n",
+            serde_json::to_string(output).unwrap_or_default()));
+
+        // content parts
+        if let Some(ref content) = output.content {
+            for (idx, part) in content.iter().enumerate() {
+                // output_text.delta (if text)
+                if let Some(ref text) = part.text {
+                    for (chunk_i, chunk) in text.as_bytes().chunks(100).enumerate() {
+                        let delta = String::from_utf8_lossy(chunk);
+                        events.push(format!(
+                            "event: response.output_text.delta\ndata: {}\n\n",
+                            serde_json::to_string(&serde_json::json!({
+                                "delta": delta,
+                                "output_index": 0,
+                                "content_index": idx,
+                            })).unwrap_or_default()
+                        ));
+                    }
+                }
+                // output_text.done
+                events.push(format!("event: response.output_text.done\ndata: {}\n\n",
+                    serde_json::to_string(&serde_json::json!({
+                        "output_index": 0,
+                        "content_index": idx,
+                    })).unwrap_or_default()));
+            }
+        }
+        // output_item.done
+        events.push(format!("event: response.output_item.done\ndata: {}\n\n",
+            serde_json::to_string(output).unwrap_or_default()));
+    }
+
+    // 3. response.done
+    events.push(format!("event: response.done\ndata: {}\n\n",
+        serde_json::to_string(&serde_json::json!({"response": resp_value})).unwrap_or_default()));
+
+    // 4. response.completed
+    events.push(format!("event: response.completed\ndata: {}\n\n",
+        serde_json::to_string(&serde_json::json!({"response": resp_value})).unwrap_or_default()));
+
+    let body = events.join("");
+    (
+        axum::http::StatusCode::OK,
+        [("Content-Type", "text/event-stream; charset=utf-8"),
+         ("Cache-Control", "no-cache"),
+         ("Connection", "keep-alive")],
+        axum::body::Body::from(body),
+    ).into_response()
+}
+
 /// Handle POST /v1/responses (OpenAI Responses API - used by Codex CLI).
 /// Converts to Chat Completions format for upstream, then converts back.
 pub async fn handle_responses(
     State(state): State<GatewayState>,
     Json(request): Json<ResponsesRequest>,
 ) -> impl IntoResponse {
+    // Detect if streaming was requested
+    let request_is_streaming = request.stream.unwrap_or(false);
+
     // Detect platform from model name
     let model = request.model.clone();
     let platform = if model.starts_with("agnes-") || model.starts_with("gpt-5.4-codex") || model.starts_with("codex-") {
@@ -254,6 +323,12 @@ pub async fn handle_responses(
             if let Ok(chat_resp) = serde_json::from_slice::<ChatCompletionsResponse>(&body) {
                 // Convert back to Responses format
                 let responses_resp = crate::apicompat::chat_completions_to_responses(&chat_resp, &model);
+
+                // If streaming was requested, convert to SSE events
+                if request_is_streaming {
+                    return responses_to_sse_stream(responses_resp);
+                }
+
                 return Json(serde_json::to_value(responses_resp).unwrap_or_default()).into_response();
             }
             // Fallback: return raw upstream response

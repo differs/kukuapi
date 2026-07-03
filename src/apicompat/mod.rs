@@ -255,7 +255,7 @@ pub fn responses_to_chat_completions(req: ResponsesRequest) -> Result<ChatComple
         max_completion_tokens: None,
         temperature: req.temperature,
         top_p: req.top_p,
-        stream: req.stream,
+        stream: Some(false), // Force non-streaming upstream
         tools: req.tools.map(|tools| {
             tools.into_iter().filter_map(|t| {
                 if t.tool_type != "function" {
