@@ -25,10 +25,10 @@ mod tls_fingerprint;
 use clap::Parser;
 use config::Config;
 use gateway::GatewayState;
-use middleware::api_key_auth::{KeyStore, MiddlewareState};
 use crate::apicompat::Platform;
 use crate::proxy::UpstreamAccount;
-use crate::routes::{register_common_routes, register_gateway_routes};
+use crate::routes::register_common_routes;
+use crate::middleware::api_key_auth::KeyStore;
 use axum::Router;
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
@@ -159,6 +159,52 @@ async fn main() {
     // Initialize key store (backed by DB if available, else in-memory)
     let key_store = KeyStore::new();
 
+    // Load API keys from database into memory
+    if let Some(pool) = pool_result.as_ref().ok() {
+        match sqlx::query(
+            r#"SELECT ak.key, ak.name, g.platform, u.id::text,
+                      ak.quota, ak.quota_used
+               FROM api_keys ak
+               JOIN groups g ON g.id = ak.group_id
+               JOIN users u ON u.id = ak.user_id
+               WHERE ak.status = 'active'"#
+        )
+        .fetch_all(pool)
+        .await
+        {
+            Ok(rows) => {
+                use sqlx::Row;
+                let count = rows.len();
+                for row in &rows {
+                    let key: String = row.try_get(0).unwrap_or_default();
+                    let name: String = row.try_get(1).unwrap_or_default();
+                    let platform: String = row.try_get(2).unwrap_or_default();
+                    let quota: f64 = row.try_get(4).unwrap_or(0.0);
+                    let quota_used: f64 = row.try_get(5).unwrap_or(0.0);
+                    key_store.insert(middleware::api_key_auth::AuthenticatedKey {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        user_id: uuid::Uuid::new_v4().to_string(),
+                        key,
+                        name,
+                        group_id: uuid::Uuid::new_v4().to_string(),
+                        group_platform: platform,
+                        status: "active".to_string(),
+                        quota: quota as i64,
+                        quota_used: quota_used as i64,
+                        expires_at: None,
+                        rate_limit_5h: None,
+                        rate_limit_1d: None,
+                        rate_limit_7d: None,
+                        ip_whitelist: None,
+                        ip_blacklist: None,
+                    });
+                }
+                info!(count, "Loaded API keys from database into store");
+            }
+            Err(e) => error!(error = %e, "Failed to load API keys from database"),
+        }
+    }
+
     // Initialize gateway service
     let mut gateway_service = proxy::GatewayService::new(config.gateway.clone());
 
@@ -168,17 +214,12 @@ async fn main() {
     let gateway_state = GatewayState {
         service: Arc::new(gateway_service),
         config: config.gateway.clone(),
-    };
-
-    let middleware_state = MiddlewareState {
-        key_store: KeyStore::new(),
-        simple_mode: config.server.mode == "simple",
+        key_store: key_store,
     };
 
     // Build router
-    let app = Router::new()
-        .merge(routes::register_common_routes())
-        .merge(routes::register_gateway_routes(gateway_state.clone(), middleware_state))
+    let app = routes::register_common_routes()
+        .merge(routes::register_gateway_routes())
         .with_state(gateway_state);
 
     // Start server
@@ -211,7 +252,7 @@ fn register_demo_accounts(service: &mut proxy::GatewayService) {
         id: "demo-anthropic-1".to_string(),
         name: "claude-sonnet-4-5-20250929".to_string(),
         platform: Platform::Anthropic,
-        base_url: "https://api.anthropic.com".to_string(),
+        base_url: "https://api.anthropic.com/v1".to_string(),
         auth_token: "demo-api-key".to_string(),
         proxy_url: None,
         tls_fingerprint_enabled: false,
@@ -227,7 +268,7 @@ fn register_demo_accounts(service: &mut proxy::GatewayService) {
         id: "demo-openai-1".to_string(),
         name: "gpt-5.4".to_string(),
         platform: Platform::OpenAI,
-        base_url: "https://api.openai.com".to_string(),
+        base_url: "https://api.openai.com/v1".to_string(),
         auth_token: "demo-openai-key".to_string(),
         proxy_url: None,
         tls_fingerprint_enabled: false,
@@ -243,7 +284,7 @@ fn register_demo_accounts(service: &mut proxy::GatewayService) {
         id: "demo-deepseek-1".to_string(),
         name: "deepseek-v4-pro".to_string(),
         platform: Platform::DeepSeek,
-        base_url: "https://api.deepseek.com".to_string(),
+        base_url: "https://api.deepseek.com/v1".to_string(),
         auth_token: "demo-deepseek-key".to_string(),
         proxy_url: None,
         tls_fingerprint_enabled: false,

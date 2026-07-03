@@ -119,6 +119,113 @@ mod apicompat_tests {
         }
     }
 
+    /// Verify Agnes request converts to OpenAI format (Codex-compatible).
+    #[test]
+    fn test_agnes_to_openai_codex() {
+        use kukuapi_rs::types::agnes::AgnesChatRequest;
+        use kukuapi_rs::types::agnes::AgnesMessage;
+        use serde_json::json;
+
+        let agnes_req = AgnesChatRequest {
+            model: "agnes-v1".to_string(),
+            messages: vec![
+                AgnesMessage {
+                    role: "system".to_string(),
+                    content: json!("You are Codex, an AI coding assistant."),
+                    name: None,
+                },
+                AgnesMessage {
+                    role: "user".to_string(),
+                    content: json!("Write a fibonacci function in Python"),
+                    name: None,
+                }
+            ],
+            stream: Some(false),
+            temperature: Some(0.7),
+            top_p: None,
+            max_tokens: Some(2000),
+            stop: None,
+            tools: None,
+            tool_choice: None,
+            metadata: Some(json!({
+                "agent_id": "codex-test",
+                "session_id": "test-001"
+            })),
+            agent_id: Some("codex-test".to_string()),
+            extra_body: None,
+        };
+
+        let api_req = kukuapi_rs::apicompat::ApiRequest::Agnes(agnes_req);
+        let converted = kukuapi_rs::apicompat::convert_request(
+            &api_req,
+            kukuapi_rs::apicompat::Platform::OpenAI,
+        ).expect("Agnes → OpenAI conversion should succeed");
+
+        match converted {
+            kukuapi_rs::apicompat::ApiRequest::OpenAIChat(chat_req) => {
+                assert_eq!(chat_req.model, "agnes-v1");
+                assert!(chat_req.messages.len() >= 2);
+                assert_eq!(chat_req.messages[0].role, "system");
+                assert_eq!(chat_req.messages[1].role, "user");
+                assert_eq!(chat_req.max_tokens, Some(2000));
+                assert_eq!(chat_req.temperature, Some(0.7));
+            }
+            _ => panic!("Expected OpenAIChat variant for Agnes conversion"),
+        }
+    }
+
+    /// Verify Agnes response with metadata converts back.
+    #[test]
+    fn test_agnes_response_roundtrip() {
+        use kukuapi_rs::types::agnes::{AgnesChatResponse, AgnesChoice, AgnesMessage, AgnesUsage, AgnesMeta};
+        use kukuapi_rs::apicompat::{ApiResponse, OutputFormat, convert_response};
+        use serde_json::json;
+
+        let agnes_resp = AgnesChatResponse {
+            id: "agnes_cpl_xxx".to_string(),
+            object_type: "chat.completion".to_string(),
+            created: 1712345678,
+            model: "agnes-v1".to_string(),
+            choices: vec![AgnesChoice {
+                index: 0,
+                message: AgnesMessage {
+                    role: "assistant".to_string(),
+                    content: json!("def fibonacci(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a"),
+                    name: None,
+                },
+                finish_reason: "stop".to_string(),
+                delta: None,
+            }],
+            usage: Some(AgnesUsage {
+                prompt_tokens: 25,
+                completion_tokens: 42,
+                total_tokens: 67,
+            }),
+            agnes_meta: Some(AgnesMeta {
+                agent_id: Some("codex-test".to_string()),
+                routing_info: Some(json!({"tier": "standard"})),
+            }),
+        };
+
+        let api_resp = ApiResponse::Agnes(agnes_resp);
+        let converted = convert_response(
+            &api_resp,
+            OutputFormat::OpenAIChat,
+            "agnes-v1",
+        ).expect("Agnes → OpenAI response conversion should succeed");
+
+        match converted {
+            ApiResponse::OpenAIChat(chat_resp) => {
+                assert!(chat_resp.choices.len() > 0);
+                assert_eq!(chat_resp.model, "agnes-v1");
+                assert!(chat_resp.usage.is_some());
+                let usage = chat_resp.usage.unwrap();
+                assert_eq!(usage.total_tokens, 67);
+            }
+            _ => panic!("Expected OpenAIChat response"),
+        }
+    }
+
     /// Verify Anthropic response converts to OpenAI Chat format.
     #[test]
     fn test_anthropic_response_to_openai() {

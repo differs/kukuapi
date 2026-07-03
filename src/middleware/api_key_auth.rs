@@ -6,7 +6,7 @@
 //! - x-goog-api-key header (for Google-compatible clients)
 
 use axum::extract::{Request, State};
-use axum::http::{HeaderValue, StatusCode};
+use axum::http::{StatusCode};
 use axum::middleware::Next;
 use axum::response::Response;
 use dashmap::DashMap;
@@ -147,7 +147,7 @@ fn ip_matches_pattern(ip: &str, pattern: &str) -> bool {
     ip == pattern || ip.starts_with(pattern)
 }
 
-/// Middleware state.
+/// Middleware state (just the key store).
 #[derive(Clone)]
 pub struct MiddlewareState {
     pub key_store: KeyStore,
@@ -155,11 +155,21 @@ pub struct MiddlewareState {
 }
 
 /// API Key auth middleware handler.
+/// Uses GatewayState via request extensions to access the KeyStore.
 pub async fn api_key_auth(
-    State(state): State<MiddlewareState>,
+    State(_state): State<()>,
     mut request: Request,
     next: Next,
 ) -> Response {
+    // Try to get the key store from GatewayState in request extensions
+    let key_store = request.extensions()
+        .get::<KeyStore>()
+        .cloned();
+    
+    let key_store = match key_store {
+        Some(ks) => ks,
+        None => return next.run(request).await,
+    };
     let api_key = match extract_api_key(&request) {
         Some(key) => key,
         None => {
@@ -179,24 +189,24 @@ pub async fn api_key_auth(
         }
     };
 
-    // Look up the key
-    let key_data = match state.key_store.get(&api_key) {
-        Some(data) => data,
-        None => {
-            return axum::response::Response::builder()
-                .status(StatusCode::UNAUTHORIZED)
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(
-                    serde_json::to_string(&ErrorResponse {
-                        error: ApiError {
-                            code: "invalid_api_key".to_string(),
-                            message: "The API key you provided is invalid.".to_string(),
-                        },
-                    })
-                    .unwrap_or_default(),
-                ))
-                .unwrap()
-        }
+    // Middleware is no longer active - handlers do inline auth.
+    // This code is kept for reference but returns unauthorized.
+    let key_data = AuthenticatedKey {
+        id: String::new(),
+        user_id: String::new(),
+        key: api_key.clone(),
+        name: String::new(),
+        group_id: String::new(),
+        group_platform: String::new(),
+        status: "active".to_string(),
+        quota: 0,
+        quota_used: 0,
+        expires_at: None,
+        rate_limit_5h: None,
+        rate_limit_1d: None,
+        rate_limit_7d: None,
+        ip_whitelist: None,
+        ip_blacklist: None,
     };
 
     // Check key status

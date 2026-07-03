@@ -2,6 +2,7 @@ server:
     host: 127.0.0.1
     port: 18081
     mode: debug
+    max_request_body_size: 10485760
 database:
     host: 127.0.0.1
     port: 15432
@@ -9,6 +10,8 @@ database:
     password: sub2api-bench-pass
     dbname: sub2api
     sslmode: disable
+    max_open_conns: 20
+    max_idle_conns: 5
 redis:
     host: 127.0.0.1
     port: 16379
@@ -17,8 +20,8 @@ redis:
     enable_tls: false
 jwt:
     secret: bench-jwt-secret
-    expire_hour: 24
-default:
+    expire_hours: 24
+default_settings:
     user_concurrency: 5
     user_balance: 0
     api_key_prefix: sk-
@@ -26,4 +29,27 @@ default:
 rate_limit:
     requests_per_minute: 60
     burst_size: 10
+gateway:
+    response_header_timeout_ms: 30000
+    max_body_size: 134217728
+    connection_pool_size: 100
+    max_account_switches: 10
+    stream_keepalive_interval_ms: 15000
+    tls_fingerprint_enabled: false
+    proxy_enabled: false
+cors:
+    allowed_origins:
+        - "*"
+    allow_credentials: true
+security:
+    url_allowlist: []
+    csp_frame_src: "'self'"
+billing:
+    circuit_breaker_enabled: false
+    circuit_breaker_threshold: 5
+    circuit_breaker_timeout_secs: 60
+log:
+    level: info
+    output: stdout
+    format: console
 timezone: UTC

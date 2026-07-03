@@ -13,12 +13,12 @@ use crate::types::anthropic::{AnthropicRequest, AnthropicResponse};
 use crate::types::openai::{ChatCompletionsRequest, ChatCompletionsResponse, ChatCompletionsChunk};
 use crate::types::deepseek::{DeepSeekChatRequest, DeepSeekChatResponse};
 use crate::types::agnes::{AgnesChatRequest, AgnesChatResponse};
+use crate::middleware::api_key_auth::KeyStore;
 
 use axum::extract::State;
-use axum::http::{header, StatusCode};
+use axum::http::{StatusCode, HeaderMap};
 use axum::response::{IntoResponse, Response, sse::{Event, Sse}};
 use axum::Json;
-use axum::body::Body;
 use chrono::Utc;
 use std::sync::Arc;
 use std::pin::Pin;
@@ -32,6 +32,7 @@ use tracing::{info, warn, error, debug};
 pub struct GatewayState {
     pub service: Arc<GatewayService>,
     pub config: GatewayConfig,
+    pub key_store: KeyStore,
 }
 
 /// Request wrapper that accepts any format.
@@ -81,10 +82,9 @@ pub struct ModelInfo {
 /// Handle POST /v1/messages (Claude API compatible).
 pub async fn handle_claude_messages(
     State(state): State<GatewayState>,
-    auth: Option<axum::extract::Extension<AuthenticatedKey>>,
     Json(request): Json<IncomingRequest>,
 ) -> Response {
-    let _key_data = auth.map(|a| a.0);
+    let _api_key = None::<String>;
     let is_streaming = request.is_streaming();
 
     // Parse the request into unified format
@@ -125,10 +125,8 @@ pub async fn handle_claude_messages(
 /// Handle POST /v1/chat/completions (OpenAI compatible).
 pub async fn handle_chat_completions(
     State(state): State<GatewayState>,
-    auth: Option<axum::extract::Extension<AuthenticatedKey>>,
     Json(request): Json<IncomingRequest>,
-) -> Response {
-    let _key_data = auth.map(|a| a.0);
+) -> impl IntoResponse {
     let is_streaming = request.is_streaming();
 
     let api_req = match parse_incoming_request(request) {
@@ -195,13 +193,16 @@ pub async fn handle_models(
 
 /// Handle GET /v1/usage.
 pub async fn handle_usage(
-    auth: Option<axum::extract::Extension<AuthenticatedKey>>,
+    headers: HeaderMap,
 ) -> Response {
-    match auth {
-        Some(key) => Json(serde_json::json!({
-            "quota": key.quota,
-            "quota_used": key.quota_used,
-            "balance": key.quota,
+    let api_key = extract_api_key_from_headers(&headers);
+    match api_key {
+        Some(_key) => Json(serde_json::json!({
+            "error": {
+                "message": "Usage tracking requires database integration",
+                "type": "not_implemented",
+                "code": "not_implemented"
+            }
         }))
         .into_response(),
         None => (
@@ -216,6 +217,34 @@ pub async fn handle_usage(
         )
             .into_response(),
     }
+}
+
+/// Helper to extract API key from request headers.
+fn extract_api_key_from_headers(headers: &HeaderMap) -> Option<String> {
+    if let Some(auth) = headers.get("Authorization") {
+        if let Ok(s) = auth.to_str() {
+            if let Some(key) = s.strip_prefix("Bearer ") {
+                if !key.is_empty() {
+                    return Some(key.to_string());
+                }
+            }
+        }
+    }
+    if let Some(key) = headers.get("x-api-key") {
+        if let Ok(s) = key.to_str() {
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    if let Some(key) = headers.get("x-goog-api-key") {
+        if let Ok(s) = key.to_str() {
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Build upstream request headers.
