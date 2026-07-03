@@ -264,14 +264,8 @@ fn build_upstream_headers(account: &UpstreamAccount) -> Vec<(String, String)> {
         ("User-Agent".to_string(), "kukuapi-rs/0.1".to_string()),
     ];
 
-    let token = &account.auth_token;
-    if token.starts_with("sk") {
-        headers.push(("Authorization".to_string(), format!("Bearer {}", account.auth_token)));
-    } else if token.starts_with("at") {
-        headers.push(("Authorization".to_string(), format!("Bearer {}", account.auth_token)));
-    } else {
-        headers.push(("x-api-key".to_string(), account.auth_token.clone()));
-    }
+    // All OpenAI-compatible APIs use Bearer token auth
+    headers.push(("Authorization".to_string(), format!("Bearer {}", account.auth_token)));
 
     headers
 }
