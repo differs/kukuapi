@@ -10,7 +10,7 @@ use crate::config::GatewayConfig;
 use crate::middleware::api_key_auth::AuthenticatedKey;
 use crate::proxy::{ForwardError, GatewayService, UpstreamAccount};
 use crate::types::anthropic::{AnthropicRequest, AnthropicResponse};
-use crate::types::openai::{ChatCompletionsRequest, ChatCompletionsResponse, ChatCompletionsChunk};
+use crate::types::openai::{ChatCompletionsRequest, ChatCompletionsResponse, ChatCompletionsChunk, ResponsesRequest};
 use crate::types::deepseek::{DeepSeekChatRequest, DeepSeekChatResponse};
 use crate::types::agnes::{AgnesChatRequest, AgnesChatResponse};
 use crate::middleware::api_key_auth::KeyStore;
@@ -137,8 +137,8 @@ pub async fn handle_chat_completions(
     };
 
     // Detect platform from model name
-    let model = api_req.model_name();
-    let platform = if model.starts_with("agnes-") {
+    let model = api_req.model_name().to_string();
+    let platform = if model.starts_with("agnes-") || model.starts_with("gpt-5.4-codex") || model.starts_with("codex-") {
         Platform::Agnes
     } else if model.starts_with("deepseek-") {
         Platform::DeepSeek
@@ -158,6 +158,13 @@ pub async fn handle_chat_completions(
         None => return json_error_response("service_unavailable", "No available upstream accounts."),
     };
 
+    // Normalize model name for Agnes upstream (override with agnes-2.0-flash)
+    let converted = if platform == Platform::Agnes {
+        normalize_model_for_agnes(&converted, "agnes-2.0-flash")
+    } else {
+        converted
+    };
+
     let upstream_url = format!("{}/chat/completions", account.base_url);
     let upstream_headers = build_upstream_headers(&account);
     let body_bytes = match serialize_api_request(&converted) {
@@ -169,6 +176,88 @@ pub async fn handle_chat_completions(
         handle_streaming_forward(state, account, &upstream_url, upstream_headers, body_bytes).await
     } else {
         handle_non_streaming_forward(state, account, platform, &upstream_url, upstream_headers, body_bytes, &api_req, "chat_completions").await
+    }
+}
+
+/// Normalize model name for Agnes upstream - override model to agnes-2.0-flash.
+fn normalize_model_for_agnes(req: &ApiRequest, agnes_model: &str) -> ApiRequest {
+    match req {
+        ApiRequest::OpenAIChat(r) => {
+            let mut cloned = r.clone();
+            cloned.model = agnes_model.to_string();
+            ApiRequest::OpenAIChat(cloned)
+        }
+        _ => req.clone(),
+    }
+}
+
+/// Handle POST /v1/responses (OpenAI Responses API - used by Codex CLI).
+/// Converts to Chat Completions format for upstream, then converts back.
+pub async fn handle_responses(
+    State(state): State<GatewayState>,
+    Json(request): Json<ResponsesRequest>,
+) -> impl IntoResponse {
+    // Detect platform from model name
+    let model = request.model.clone();
+    let platform = if model.starts_with("agnes-") || model.starts_with("gpt-5.4-codex") || model.starts_with("codex-") {
+        Platform::Agnes
+    } else if model.starts_with("deepseek-") {
+        Platform::DeepSeek
+    } else if model.contains("claude") {
+        Platform::Anthropic
+    } else {
+        Platform::OpenAI
+    };
+
+    // Convert Responses request to Chat Completions
+    let chat_req = match crate::apicompat::responses_to_chat_completions(request) {
+        Ok(req) => req,
+        Err(e) => return json_error_response("conversion_error", &e),
+    };
+
+    let converted = match convert_request(&ApiRequest::OpenAIChat(chat_req), platform) {
+        Ok(req) => req,
+        Err(e) => return json_error_response("unsupported_format_error", &format!("Conversion error: {}", e)),
+    };
+
+    let account = match state.service.select_account(Some(platform)) {
+        Some(acc) => acc,
+        None => return json_error_response("service_unavailable", "No available upstream accounts."),
+    };
+
+    // Normalize model name for Agnes upstream
+    let converted = if platform == Platform::Agnes {
+        normalize_model_for_agnes(&converted, "agnes-2.0-flash")
+    } else {
+        converted
+    };
+
+    let upstream_url = format!("{}/chat/completions", account.base_url);
+    let upstream_headers = build_upstream_headers(&account);
+    let body_bytes = match serialize_api_request(&converted) {
+        Ok(b) => b,
+        Err(e) => return json_error_response("internal_error", &format!("Serialization error: {}", e)),
+    };
+
+    // Forward as non-streaming
+    let result = state
+        .service
+        .forward(&account, reqwest::Method::POST, &upstream_url, upstream_headers, Some(body_bytes), false)
+        .await;
+
+    match result {
+        Ok(fwd_response) => {
+            let body = fwd_response.body.unwrap_or_default();
+            // Try to parse as Chat Completions response
+            if let Ok(chat_resp) = serde_json::from_slice::<ChatCompletionsResponse>(&body) {
+                // Convert back to Responses format
+                let responses_resp = crate::apicompat::chat_completions_to_responses(&chat_resp, &model);
+                return Json(serde_json::to_value(responses_resp).unwrap_or_default()).into_response();
+            }
+            // Fallback: return raw upstream response
+            (fwd_response.status, axum::body::Body::from(body)).into_response()
+        }
+        Err(e) => forward_error_to_response(e, platform),
     }
 }
 

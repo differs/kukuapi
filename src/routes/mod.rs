@@ -3,14 +3,14 @@
 use axum::routing::{get, post};
 use axum::Router;
 
-use crate::gateway::{GatewayState, handle_chat_completions, handle_claude_messages, handle_models, handle_usage};
+use crate::gateway::{GatewayState, handle_chat_completions, handle_claude_messages, handle_models, handle_responses, handle_usage};
 
-/// Register all gateway routes (POST routes include Claude Messages, OpenAI Chat/Responses/Images APIs).
+/// Register all gateway routes.
 pub fn register_gateway_routes() -> Router<GatewayState> {
     Router::new()
         .route("/v1/messages", post(handle_claude_messages))
         .route("/v1/chat/completions", post(handle_chat_completions))
-        .route("/v1/responses", post(handle_claude_messages))
+        .route("/v1/responses", post(handle_responses))
         .route("/v1/messages/count_tokens", post(handle_claude_messages))
         .route("/v1/models", get(handle_models))
         .route("/v1/usage", get(handle_usage))
