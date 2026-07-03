@@ -265,7 +265,7 @@ pub async fn handle_responses(
 pub async fn handle_models(
     State(state): State<GatewayState>,
 ) -> Json<serde_json::Value> {
-    let models: Vec<ModelInfo> = state
+    let mut models: Vec<ModelInfo> = state
         .service
         .accounts
         .iter()
@@ -285,6 +285,20 @@ pub async fn handle_models(
             }]
         })
         .collect();
+
+    // Add Codex-compatible model aliases
+    models.push(ModelInfo {
+        id: "gpt-5.4-codex".to_string(),
+        object_type: "model".to_string(),
+        created: Utc::now().timestamp(),
+        owned_by: "agnes".to_string(),
+    });
+    models.push(ModelInfo {
+        id: "codex-cli".to_string(),
+        object_type: "model".to_string(),
+        created: Utc::now().timestamp(),
+        owned_by: "agnes".to_string(),
+    });
 
     Json(serde_json::json!({
         "data": models,
