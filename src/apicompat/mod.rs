@@ -218,20 +218,6 @@ impl OutputFormat {
 
 /// Convert OpenAI Responses API request to Chat Completions request.
 pub fn responses_to_chat_completions(req: ResponsesRequest) -> Result<ChatCompletionsRequest, String> {
-    let input_text = match &req.input {
-        serde_json::Value::String(s) => s.clone(),
-        serde_json::Value::Array(items) => {
-            let mut texts = Vec::new();
-            for item in items {
-                if let Some(text) = item.get("content").and_then(|c| c.as_str()) {
-                    texts.push(text.to_string());
-                }
-            }
-            texts.join("\n")
-        }
-        _ => String::new(),
-    };
-
     let mut messages = Vec::new();
 
     // Instructions become system message
@@ -245,13 +231,21 @@ pub fn responses_to_chat_completions(req: ResponsesRequest) -> Result<ChatComple
         }
     }
 
-    // Input becomes user message
-    if !input_text.is_empty() {
-        messages.push(ChatMessage {
-            role: "user".to_string(),
-            content: Some(serde_json::Value::String(input_text)),
-            ..Default::default()
-        });
+    // Extract messages from Responses API input
+    let chat_messages = extract_responses_input(&req.input);
+    messages.extend(chat_messages);
+
+    // If no messages found, check for string input
+    if messages.is_empty() {
+        if let serde_json::Value::String(s) = &req.input {
+            if !s.is_empty() {
+                messages.push(ChatMessage {
+                    role: "user".to_string(),
+                    content: Some(serde_json::Value::String(s.clone())),
+                    ..Default::default()
+                });
+            }
+        }
     }
 
     Ok(ChatCompletionsRequest {
@@ -280,6 +274,68 @@ pub fn responses_to_chat_completions(req: ResponsesRequest) -> Result<ChatComple
         }),
         ..Default::default()
     })
+}
+
+/// Extract ChatMessage list from Responses API input value.
+fn extract_responses_input(input: &serde_json::Value) -> Vec<ChatMessage> {
+    let mut messages = Vec::new();
+    match input {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                let role = item.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+                if role == "system" || role == "developer" {
+                    if let Some(text) = extract_content_text(item) {
+                        messages.push(ChatMessage {
+                            role: role.to_string(),
+                            content: Some(serde_json::Value::String(text)),
+                            ..Default::default()
+                        });
+                    }
+                } else if role == "user" {
+                    if let Some(text) = extract_content_text(item) {
+                        messages.push(ChatMessage {
+                            role: "user".to_string(),
+                            content: Some(serde_json::Value::String(text)),
+                            ..Default::default()
+                        });
+                    }
+                } else if role == "assistant" {
+                    if let Some(text) = extract_content_text(item) {
+                        messages.push(ChatMessage {
+                            role: "assistant".to_string(),
+                            content: Some(serde_json::Value::String(text)),
+                            ..Default::default()
+                        });
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    messages
+}
+
+/// Extract text from a Responses API item's content field.
+/// Content can be a string, an array of parts, or missing.
+fn extract_content_text(item: &serde_json::Value) -> Option<String> {
+    let content = item.get("content")?;
+    match content {
+        serde_json::Value::String(s) => {
+            if s.is_empty() { None } else { Some(s.clone()) }
+        }
+        serde_json::Value::Array(parts) => {
+            let mut texts = Vec::new();
+            for part in parts {
+                if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                    if !text.is_empty() {
+                        texts.push(text.to_string());
+                    }
+                }
+            }
+            if texts.is_empty() { None } else { Some(texts.join("\n")) }
+        }
+        _ => None,
+    }
 }
 
 /// Convert Chat Completions response to OpenAI Responses API response.
