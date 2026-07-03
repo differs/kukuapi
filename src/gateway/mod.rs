@@ -145,7 +145,8 @@ pub async fn handle_chat_completions(
     } else if model.contains("claude") {
         Platform::Anthropic
     } else {
-        Platform::OpenAI
+        // Default to Agnes for unknown models (only real upstream)
+        Platform::Agnes
     };
 
     let converted = match convert_request(&api_req, platform) {
@@ -206,7 +207,8 @@ pub async fn handle_responses(
     } else if model.contains("claude") {
         Platform::Anthropic
     } else {
-        Platform::OpenAI
+        // Default to Agnes for unknown models (only real upstream)
+        Platform::Agnes
     };
 
     // Convert Responses request to Chat Completions
