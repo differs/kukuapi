@@ -302,7 +302,7 @@ fn register_demo_accounts(service: &mut proxy::GatewayService) {
         id: "agnes-1".to_string(),
         name: "agnes-2.0-flash".to_string(),
         platform: Platform::Agnes,
-        base_url: "https://api.agnes-ai.com/api/v1".to_string(),
+        base_url: "https://apihub.agnes-ai.com/v1".to_string(),
         auth_token: agnes_api_key,
         proxy_url: None,
         tls_fingerprint_enabled: false,

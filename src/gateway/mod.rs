@@ -36,11 +36,13 @@ pub struct GatewayState {
 }
 
 /// Request wrapper that accepts any format.
+/// Order matters: serde(untagged) tries variants left to right.
+/// OpenAI Chat is most common for /v1/chat/completions, put it first.
 #[derive(serde::Deserialize, Debug)]
 #[serde(untagged)]
 pub enum IncomingRequest {
-    Anthropic(AnthropicRequest),
     OpenAIChat(ChatCompletionsRequest),
+    Anthropic(AnthropicRequest),
     DeepSeek(DeepSeekChatRequest),
     Agnes(AgnesChatRequest),
     Raw(serde_json::Value),

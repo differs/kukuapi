@@ -105,7 +105,8 @@ pub fn convert_request(
             Ok(ApiRequest::OpenAIChat(agnes_to_openai(req)))
         }
         (ApiRequest::OpenAIChat(req), Platform::Agnes) => {
-            Ok(ApiRequest::Agnes(openai_to_agnes(req)))
+            // Agnes API is OpenAI-compatible, pass through as-is
+            Ok(ApiRequest::OpenAIChat(req.clone()))
         }
         (ApiRequest::Anthropic(_), Platform::Anthropic) => Ok(request.clone()),
         (ApiRequest::OpenAIChat(_), Platform::OpenAI) => Ok(request.clone()),
